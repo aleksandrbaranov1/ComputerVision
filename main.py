@@ -1,60 +1,58 @@
 import cv2
-import face_recognition
+import mysql.connector
+from datetime import datetime
 
-# Инициализация переменных
-known_face_encodings = []
-current_id = 0  # Счетчик для уникальных идентификаторов
-face_id_mapping = {}  # Словарь, сопоставляющий координаты лиц с уникальными идентификаторами
+# Установите соединение с базой данных
+db_connection = mysql.connector.connect(
+    host="localhost",      # или IP-адрес вашего MySQL-сервера
+    user="root",  # ваше имя пользователя
+    password="0000",          # ваш пароль
+    database="computerVision"     # имя вашей базы данных
+)
 
-# Видео поток
-video_capture = cv2.VideoCapture(0)  # '0' для веб-камеры, или укажите путь к видеофайлу
+cursor = db_connection.cursor()
+
+# Инициализация каскадного классификатора для обнаружения лиц
+face_cascade = cv2.CascadeClassifier("haarcascade_frontalface_default.xml")
+
+# Захват видео с камеры
+capture = cv2.VideoCapture(0)
 
 while True:
-    # Захват кадра
-    ret, frame = video_capture.read()
+    ret, img = capture.read()
     
-    # Преобразование изображения из BGR в RGB
-    rgb_frame = frame[:, :, ::-1]
+    if not ret:
+        print("Не удалось захватить изображение")
+        break
 
-    # Обнаружение лиц в кадре
-    face_locations = face_recognition.face_locations(rgb_frame)
-    face_encodings = face_recognition.face_encodings(rgb_frame, face_locations)
+    # Обнаружение лиц
+    faces = face_cascade.detectMultiScale(img, scaleFactor=1.5, minNeighbors=2, minSize=(20, 20))
 
-    detected_ids = []  # Список для хранения обнаруженных идентификаторов
+    # Рисуем прямоугольники вокруг обнаруженных лиц
+    for (x, y, w, h) in faces:
+        cv2.rectangle(img, (x, y), (x + w, y + h), (255, 0, 0))
 
-    for face_encoding, face_location in zip(face_encodings, face_locations):
-        # Уникальный идентификатор для этого лица
-        # Проверка, встречали ли мы это лицо ранее
-        matches = face_recognition.compare_faces(known_face_encodings, face_encoding)
-        
-        if True not in matches:
-            # Если совпадений нет, назначить новое имя
-            detected_id = current_id
-            known_face_encodings.append(face_encoding)  # Добавляем новое лицо в известные лица
-            current_id += 1  # Увеличиваем идентификатор для следующего лица
-        else:
-            # Если лицо уже известно, находим его идентификатор
-            first_match_index = matches.index(True)
-            detected_id = first_match_index  # Используем индекс известных лиц как идентификатор
+    # Записываем количество лиц и текущее время в базу данных
+    face_count = len(faces)
+    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    
+    # SQL запрос для вставки данных
+    sql = "INSERT INTO face_detection (timestamp, face_count) VALUES (%s, %s)"
+    cursor.execute(sql, (timestamp, face_count))
+    db_connection.commit()  # Сохраняем изменения в базе данных
 
-        # Сохраняем найденный идентификатор
-        detected_ids.append(detected_id)
+    print(f"количество лиц: {face_count} на {timestamp}")
 
-        # Прямоугольник вокруг лица
-        top, right, bottom, left = face_location
-        cv2.rectangle(frame, (left, top), (right, bottom), (0, 255, 0), 2)
-        cv2.putText(frame, str(detected_id), (left, top - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
-
-    # Вывод количества обнаруженных лиц и их идентификаторы в консоль
-    print(f"Обнаружено лиц: {len(detected_ids)}; Идентификаторы: {detected_ids}")
-
-    # Отображение результата
-    cv2.imshow('Video', frame)
-
-    # Выйти при нажатии 'q'
-    if cv2.waitKey(1) & 0xFF == ord('q'):
+    # Отображаем изображение с обнаружением лиц
+    cv2.imshow("My webcam", img)
+    k = cv2.waitKey(30) & 0xFF
+    if k == 27:  # нажмите ESC для выхода
         break
 
 # Освобождение ресурсов
-video_capture.release()
+capture.release()
 cv2.destroyAllWindows()
+
+# Закрываем соединение с базой данных
+cursor.close()
+db_connection.close()
